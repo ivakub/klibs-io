@@ -35,7 +35,7 @@ jobs:
               customFields: [
                 {
                   name: "Subsystem",
-                  $type: "SingleEnumIssueCustomField",
+                  "$type": "SingleEnumIssueCustomField",
                   value: { name: $subsystem }
                 }
               ]
