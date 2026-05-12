@@ -20,18 +20,20 @@ jobs:
       - name: Create YouTrack issue
         run: |
           set -euo pipefail
-          DESCRIPTION=$(printf '%s\n\n---\nReported from GitHub: %s\nAuthor: @%s' \
-            "${GH_ISSUE_BODY:-(no description)}" "${GH_ISSUE_URL}" "${GH_ISSUE_USER}")
+          YT_BASE_URL="${YT_BASE_URL%/}"
 
-          PAYLOAD=$(jq -n \
-            --arg project "${YT_PROJECT}" \
-            --arg summary "${GH_ISSUE_TITLE}" \
-            --arg description "${DESCRIPTION}" \
-            --arg subsystem "${YT_SUBSYSTEM}" \
+          description="$(printf '%s\n\n---\nReported from GitHub: %s\nAuthor: @%s' \
+            "${GH_ISSUE_BODY:-(no description)}" "${GH_ISSUE_URL}" "${GH_ISSUE_USER}")"
+
+          payload="$(jq -n \
+            --arg proj "$YT_PROJECT" \
+            --arg summary "$GH_ISSUE_TITLE" \
+            --arg desc "$description" \
+            --arg subsystem "$YT_SUBSYSTEM" \
             '{
-              project: { id: $project },
+              project: { shortName: $proj },
               summary: $summary,
-              description: $description,
+              description: $desc,
               customFields: [
                 {
                   name: "Subsystem",
@@ -39,22 +41,36 @@ jobs:
                   value: { name: $subsystem }
                 }
               ]
-            }')
+            }'
+          )"
 
-          HTTP_CODE=$(curl -sS -o /tmp/yt-response.json -w '%{http_code}' -X POST \
-            -H "Authorization: Bearer ${YT_TOKEN}" \
-            -H "Content-Type: application/json" \
-            -H "Accept: application/json" \
-            "${YT_BASE_URL}/api/issues?fields=id,idReadable" \
-            -d "${PAYLOAD}")
+          tmp_payload="$(mktemp)"
+          tmp_resp="$(mktemp)"
+          printf '%s' "$payload" > "$tmp_payload"
 
-          echo "HTTP ${HTTP_CODE}"
-          cat /tmp/yt-response.json
-          echo
+          status="$(
+            curl -sS \
+              --http1.1 \
+              -H "Expect:" \
+              -H "Authorization: Bearer ${YT_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              --data-binary @"$tmp_payload" \
+              -o "$tmp_resp" \
+              -w "%{http_code}" \
+              "${YT_BASE_URL}/api/issues?fields=idReadable,id,summary"
+          )"
 
-          if [ "${HTTP_CODE}" != "200" ] && [ "${HTTP_CODE}" != "201" ]; then
+          issue_id="$(jq -r '.idReadable // .id // empty' < "$tmp_resp")"
+          issue_summary="$(jq -r '.summary // empty' < "$tmp_resp")"
+
+          if [ -n "$issue_id" ]; then
+            echo "Created: $issue_id — $issue_summary"
+            echo "URL: ${YT_BASE_URL}/issue/${issue_id}"
+          else
+            echo "HTTP: $status"
+            cat "$tmp_resp"
             exit 1
           fi
 
-          YT_ID=$(jq -r '.idReadable' /tmp/yt-response.json)
-          echo "Created YouTrack issue: ${YT_BASE_URL}/issue/${YT_ID}"
+          rm -f "$tmp_payload" "$tmp_resp"
