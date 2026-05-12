@@ -1,0 +1,76 @@
+name: Create YouTrack issue from GitHub issue
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  create-youtrack-issue:
+    runs-on: ubuntu-latest
+    env:
+      YT_BASE_URL: https://youtrack.jetbrains.com
+      YT_PROJECT: ${{ secrets.YT_PROJECT }}
+      YT_SUBSYSTEM: ${{ secrets.YT_SUBSYSTEM }}
+      YT_TOKEN: ${{ secrets.YT_TOKEN }}
+      GH_ISSUE_TITLE: ${{ github.event.issue.title }}
+      GH_ISSUE_BODY: ${{ github.event.issue.body }}
+      GH_ISSUE_URL: ${{ github.event.issue.html_url }}
+      GH_ISSUE_USER: ${{ github.event.issue.user.login }}
+    steps:
+      - name: Create YouTrack issue
+        run: |
+          set -euo pipefail
+          YT_BASE_URL="${YT_BASE_URL%/}"
+
+          description="$(printf '%s\n\n---\nReported from GitHub: %s\nAuthor: `@%s`' \
+            "${GH_ISSUE_BODY:-(no description)}" "${GH_ISSUE_URL}" "${GH_ISSUE_USER}")"
+
+          payload="$(jq -n \
+            --arg proj "$YT_PROJECT" \
+            --arg summary "$GH_ISSUE_TITLE" \
+            --arg desc "$description" \
+            --arg subsystem "$YT_SUBSYSTEM" \
+            '{
+              project: { shortName: $proj },
+              summary: $summary,
+              description: $desc,
+              customFields: [
+                {
+                  name: "Subsystem",
+                  "$type": "SingleEnumIssueCustomField",
+                  value: { name: $subsystem }
+                }
+              ]
+            }'
+          )"
+
+          tmp_payload="$(mktemp)"
+          tmp_resp="$(mktemp)"
+          printf '%s' "$payload" > "$tmp_payload"
+
+          status="$(
+            curl -sS \
+              --http1.1 \
+              -H "Expect:" \
+              -H "Authorization: Bearer ${YT_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              --data-binary @"$tmp_payload" \
+              -o "$tmp_resp" \
+              -w "%{http_code}" \
+              "${YT_BASE_URL}/api/issues?fields=idReadable,id,summary"
+          )"
+
+          issue_id="$(jq -r '.idReadable // .id // empty' < "$tmp_resp")"
+          issue_summary="$(jq -r '.summary // empty' < "$tmp_resp")"
+
+          if [ -n "$issue_id" ]; then
+            echo "Created: $issue_id — $issue_summary"
+            echo "URL: ${YT_BASE_URL}/issue/${issue_id}"
+          else
+            echo "HTTP: $status"
+            cat "$tmp_resp"
+            exit 1
+          fi
+
+          rm -f "$tmp_payload" "$tmp_resp"
