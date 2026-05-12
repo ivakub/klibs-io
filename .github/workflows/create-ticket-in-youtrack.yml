@@ -17,21 +17,6 @@ jobs:
       GH_ISSUE_URL: ${{ github.event.issue.html_url }}
       GH_ISSUE_USER: ${{ github.event.issue.user.login }}
     steps:
-      - name: Resolve YouTrack project id
-        id: project
-        run: |
-          set -euo pipefail
-          PROJECT_ID=$(curl -fsS \
-            -H "Authorization: Bearer ${YT_TOKEN}" \
-            -H "Accept: application/json" \
-            "${YT_BASE_URL}/api/admin/projects?fields=id,shortName&query=${YT_PROJECT}" \
-            | jq -r --arg s "${YT_PROJECT}" '.[] | select(.shortName==$s) | .id')
-          if [ -z "${PROJECT_ID}" ]; then
-            echo "Project ${YT_PROJECT} not found in YouTrack" >&2
-            exit 1
-          fi
-          echo "id=${PROJECT_ID}" >> "$GITHUB_OUTPUT"
-
       - name: Create YouTrack issue
         run: |
           set -euo pipefail
@@ -39,12 +24,12 @@ jobs:
             "${GH_ISSUE_BODY:-(no description)}" "${GH_ISSUE_URL}" "${GH_ISSUE_USER}")
 
           PAYLOAD=$(jq -n \
-            --arg pid "${{ steps.project.outputs.id }}" \
+            --arg project "${YT_PROJECT}" \
             --arg summary "${GH_ISSUE_TITLE}" \
             --arg description "${DESCRIPTION}" \
             --arg subsystem "${YT_SUBSYSTEM}" \
             '{
-              project: { id: $pid },
+              project: { id: $project },
               summary: $summary,
               description: $description,
               customFields: [
