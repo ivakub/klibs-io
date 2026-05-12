@@ -41,12 +41,20 @@ jobs:
               ]
             }')
 
-          RESPONSE=$(curl -fsS -X POST \
+          HTTP_CODE=$(curl -sS -o /tmp/yt-response.json -w '%{http_code}' -X POST \
             -H "Authorization: Bearer ${YT_TOKEN}" \
             -H "Content-Type: application/json" \
             -H "Accept: application/json" \
             "${YT_BASE_URL}/api/issues?fields=id,idReadable" \
             -d "${PAYLOAD}")
 
-          YT_ID=$(echo "${RESPONSE}" | jq -r '.idReadable')
+          echo "HTTP ${HTTP_CODE}"
+          cat /tmp/yt-response.json
+          echo
+
+          if [ "${HTTP_CODE}" != "200" ] && [ "${HTTP_CODE}" != "201" ]; then
+            exit 1
+          fi
+
+          YT_ID=$(jq -r '.idReadable' /tmp/yt-response.json)
           echo "Created YouTrack issue: ${YT_BASE_URL}/issue/${YT_ID}"
